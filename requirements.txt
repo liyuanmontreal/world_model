@@ -1,6 +1,9 @@
+
 torch
 torchvision
 numpy
 matplotlib
-gym
 tqdm
+gymnasium
+imageio
+cma
