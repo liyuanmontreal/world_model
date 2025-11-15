@@ -1,46 +1,38 @@
-import gymnasium as gym
 import numpy as np
 import torch
-from torchvision import transforms
+import cv2
 
+from src.custom_carracing import RealisticCarRacing
 
 class CarRacingVAEWrapper:
-    """Robust wrapper for CarRacing (auto-detect version, fix Box2D dtype issue)."""
+    """
+    Wrap RealisticCarRacing to produce VAE-ready tensors.
 
-    def __init__(self, seed: int = 0):
-        # 尝试不同版本
-        for ver in ["v3", "v2", "v1"]:
-            env_id = f"CarRacing-{ver}"
-            try:
-                self.env = gym.make(env_id, continuous=True, render_mode="rgb_array")
-                print(f"[INFO] Using environment: {env_id}")
-                break
-            except gym.error.Error:
-                continue
-        else:
-            raise RuntimeError("No compatible CarRacing environment found.")
-        self.env.reset(seed=seed)
+    - env.env: underlying RealisticCarRacing
+    - reset() / step() 返回处理后的 obs: torch.Tensor [3, H, W] in [-0.5, 0.5]
+    """
 
-        # 图像预处理
-        self.transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Resize((64, 64)),
-        ])
+    def __init__(self, obs_size=64):
+        self.obs_size = obs_size      # 供 VAE 使用的分辨率
+        self.env = RealisticCarRacing(render_mode="rgb_array", obs_size=96)
+
+    def _proc_obs(self, img):
+        img = cv2.resize(img, (self.obs_size, self.obs_size))
+        img = img.astype(np.float32) / 255.0 - 0.5
+        img = np.transpose(img, (2, 0, 1))  # HWC -> CHW
+        return torch.tensor(img, dtype=torch.float32)
 
     def reset(self):
         obs, _ = self.env.reset()
         return self._proc_obs(obs)
 
     def step(self, action):
-        # 转换为 float64，防止 Box2D motorSpeed 类型错误
-        action = np.array(action, dtype=np.float64)
         obs, reward, terminated, truncated, info = self.env.step(action)
         return self._proc_obs(obs), reward, terminated, truncated, info
 
-    def _proc_obs(self, obs):
-        """将环境输出图像转换为 tensor"""
-        img = np.array(obs)
-        return self.transform(img)
+    def render(self):
+        return self.env.render()
 
     def close(self):
-        self.env.close()
+        if hasattr(self.env, "close"):
+            self.env.close()
